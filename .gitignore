@@ -1,0 +1,17 @@
+target/
+.tools/
+.idea/
+.vscode/
+*.iml
+*.log
+*.class
+
+# Maven wrapper
+.mvn/wrapper/maven-wrapper.jar
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# temp samples
+data/*-v2.csv
