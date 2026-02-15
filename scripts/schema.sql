@@ -14,13 +14,13 @@ CREATE TABLE financial_product (
 
 CREATE TABLE transaction_record (
     id BIGSERIAL PRIMARY KEY,
-    tx_date DATE NOT NULL,
+    tx_date DATE NULL,
     branch_id BIGINT NULL REFERENCES branch(id),
     product_id BIGINT NULL REFERENCES financial_product(id),
     raw_branch_code VARCHAR(20) NOT NULL,
     raw_product_code VARCHAR(20) NOT NULL,
-    amount NUMERIC(18,2) NOT NULL,
-    tx_type VARCHAR(20) NOT NULL CHECK (tx_type IN ('INGRESO', 'EGRESO')),
+    amount NUMERIC(18,2) NULL,
+    tx_type VARCHAR(20) NULL CHECK (tx_type IN ('INGRESO', 'EGRESO')),
     status VARCHAR(20) NOT NULL CHECK (status IN ('PENDIENTE', 'CONCILIADA', 'RECHAZADA')),
     rejection_reason VARCHAR(255) NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()

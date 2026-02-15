@@ -11,6 +11,9 @@ import com.coop.financialclose.repository.FinancialProductRepository;
 import com.coop.financialclose.service.validation.TransactionValidationStrategy;
 import com.coop.financialclose.service.validation.ValidationResult;
 import com.coop.financialclose.service.validation.ValidationStrategyFactory;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVRecord;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -73,22 +76,21 @@ public class UploadService {
 
         List<InsertRow> batch = new ArrayList<>(BATCH_SIZE);
 
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            int lineNumber = 0;
-            while ((line = reader.readLine()) != null) {
-                lineNumber++;
-                if (line.isBlank()) {
+        CSVFormat csvFormat = CSVFormat.DEFAULT.builder()
+            .setTrim(true)
+            .setIgnoreEmptyLines(true)
+            .build();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8));
+             CSVParser parser = new CSVParser(reader, csvFormat)) {
+            boolean firstRecord = true;
+            for (CSVRecord record : parser) {
+                if (firstRecord && looksLikeHeader(get(record, 0))) {
+                    firstRecord = false;
                     continue;
                 }
-
-                String[] cols = line.split(",", -1);
-                if (lineNumber == 1 && looksLikeHeader(cols)) {
-                    continue;
-                }
-
+                firstRecord = false;
                 processed++;
-                ParseResult parsed = parse(cols);
+                ParseResult parsed = parse(record);
                 FinancialProduct product = productsByCode.get(parsed.productCode);
                 Branch branch = branchesByCode.get(parsed.branchCode);
 
@@ -104,7 +106,7 @@ public class UploadService {
                 } else if (product == null) {
                     status = TransactionStatus.RECHAZADA;
                     rejectionReason = "PRODUCT_NOT_FOUND";
-                } else if (parsed.amount.compareTo(BigDecimal.ZERO) <= 0) {
+                } else if (parsed.amount == null || parsed.amount.compareTo(BigDecimal.ZERO) <= 0) {
                     status = TransactionStatus.RECHAZADA;
                     rejectionReason = "INVALID_AMOUNT";
                 } else if (!parsed.validTxType) {
@@ -112,7 +114,10 @@ public class UploadService {
                     rejectionReason = "INVALID_TX_TYPE";
                 } else {
                     TransactionValidationStrategy strategy = validationStrategyFactory.resolve(product.getType());
-                    if (strategy != null) {
+                    if (strategy == null) {
+                        status = TransactionStatus.RECHAZADA;
+                        rejectionReason = "STRATEGY_NOT_FOUND";
+                    } else {
                         ValidationResult result = strategy.validate(parsed.toUploadLineDTO());
                         if (!result.valid()) {
                             status = TransactionStatus.RECHAZADA;
@@ -153,45 +158,49 @@ public class UploadService {
         return new UploadResultDTO(processed, accepted, rejected, errorsByReason, elapsed);
     }
 
-    private boolean looksLikeHeader(String[] cols) {
-        if (cols.length < 5) {
+    private String get(CSVRecord record, int index) {
+        if (record.size() <= index) {
+            return "";
+        }
+        return record.get(index).trim();
+    }
+
+    private boolean looksLikeHeader(String firstCol) {
+        if (firstCol == null || firstCol.isBlank()) {
             return false;
         }
-        String first = cols[0].trim().toLowerCase(Locale.ROOT);
+        String first = firstCol.trim().toLowerCase(Locale.ROOT);
         return first.equals("fecha") || first.equals("date");
     }
 
-    private ParseResult parse(String[] cols) {
-        String dateRaw = cols.length > 0 ? cols[0].trim() : "";
-        String branchCode = cols.length > 1 ? cols[1].trim() : "";
-        String productCode = cols.length > 2 ? cols[2].trim() : "";
-        String amountRaw = cols.length > 3 ? cols[3].trim() : "";
-        String typeRaw = cols.length > 4 ? cols[4].trim() : "";
+    private ParseResult parse(CSVRecord record) {
+        String dateRaw = get(record, 0);
+        String branchCode = get(record, 1);
+        String productCode = get(record, 2);
+        String amountRaw = get(record, 3);
+        String typeRaw = get(record, 4);
 
-        LocalDate date;
+        LocalDate date = null;
         boolean validDate = true;
         try {
             date = LocalDate.parse(dateRaw);
         } catch (Exception ex) {
-            date = LocalDate.now();
             validDate = false;
         }
 
-        BigDecimal amount;
+        BigDecimal amount = null;
         boolean validAmount = true;
         try {
             amount = new BigDecimal(amountRaw);
         } catch (Exception ex) {
-            amount = BigDecimal.ZERO;
             validAmount = false;
         }
 
-        TransactionType txType;
+        TransactionType txType = null;
         boolean validTxType = true;
         try {
             txType = TransactionType.valueOf(typeRaw.toUpperCase(Locale.ROOT));
         } catch (Exception ex) {
-            txType = TransactionType.INGRESO;
             validTxType = false;
         }
 
@@ -208,7 +217,11 @@ public class UploadService {
             (tx_date, branch_id, product_id, raw_branch_code, raw_product_code, amount, tx_type, status, rejection_reason, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, batch, batch.size(), (PreparedStatement ps, InsertRow row) -> {
-            ps.setDate(1, Date.valueOf(row.date));
+            if (row.date == null) {
+                ps.setNull(1, java.sql.Types.DATE);
+            } else {
+                ps.setDate(1, Date.valueOf(row.date));
+            }
             if (row.branchId == null) {
                 ps.setNull(2, java.sql.Types.BIGINT);
             } else {
@@ -221,8 +234,16 @@ public class UploadService {
             }
             ps.setString(4, row.rawBranchCode);
             ps.setString(5, row.rawProductCode);
-            ps.setBigDecimal(6, row.amount);
-            ps.setString(7, row.txType.name());
+            if (row.amount == null) {
+                ps.setNull(6, java.sql.Types.NUMERIC);
+            } else {
+                ps.setBigDecimal(6, row.amount);
+            }
+            if (row.txType == null) {
+                ps.setNull(7, java.sql.Types.VARCHAR);
+            } else {
+                ps.setString(7, row.txType.name());
+            }
             ps.setString(8, row.status.name());
             ps.setString(9, row.rejectionReason);
             ps.setTimestamp(10, Timestamp.valueOf(row.createdAt));
@@ -252,7 +273,13 @@ public class UploadService {
                                boolean validAmount,
                                boolean validTxType) {
         com.coop.financialclose.dto.UploadLineDTO toUploadLineDTO() {
-            return new com.coop.financialclose.dto.UploadLineDTO(date, branchCode, productCode, amount.toPlainString(), txType.name());
+            return new com.coop.financialclose.dto.UploadLineDTO(
+                date,
+                branchCode,
+                productCode,
+                amount == null ? null : amount.toPlainString(),
+                txType == null ? null : txType.name()
+            );
         }
     }
 }

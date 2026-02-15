@@ -24,7 +24,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleGeneric(Exception ex) {
-        return build(HttpStatus.INTERNAL_SERVER_ERROR, ex.getMessage());
+        return build(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     private ResponseEntity<ApiError> build(HttpStatus status, String message) {

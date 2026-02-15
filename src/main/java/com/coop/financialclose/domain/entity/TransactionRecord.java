@@ -26,7 +26,7 @@ public class TransactionRecord {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "tx_date", nullable = false)
+    @Column(name = "tx_date")
     private LocalDate txDate;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -43,11 +43,11 @@ public class TransactionRecord {
     @Column(name = "raw_product_code", nullable = false, length = 20)
     private String rawProductCode;
 
-    @Column(nullable = false, precision = 18, scale = 2)
+    @Column(precision = 18, scale = 2)
     private BigDecimal amount;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "tx_type", nullable = false, length = 20)
+    @Column(name = "tx_type", length = 20)
     private TransactionType txType;
 
     @Enumerated(EnumType.STRING)
