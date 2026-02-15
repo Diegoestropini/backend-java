@@ -82,6 +82,15 @@ Patrones usados:
 - `GET /api/close-summary` (resumen por fecha)
 - `POST /api/process-close` (ejecucion manual del cierre)
 
+### Nota de idempotencia de cierre
+
+El cierre diario es idempotente por estrategia `DELETE + INSERT` en una misma transaccion:
+
+1. se eliminan los registros existentes de `daily_close` para la fecha solicitada,
+2. se recalculan e insertan los agregados de esa fecha.
+
+Ejecutar `POST /api/process-close` varias veces para el mismo dia no duplica totales.
+
 ## Pruebas de API (curl)
 
 ```bash
@@ -118,7 +127,7 @@ Metricas a monitorear:
 Integridad financiera:
 
 - Validar que `sum(net_total)` de `daily_close` coincida con la suma neta de `transaction_record` conciliadas del dia.
-- Verificar que rerun de cierre no duplique montos.
+- Verificar que rerun de cierre no duplique montos (por estrategia `DELETE + INSERT`).
 
 Ajustes si se degrada rendimiento:
 
